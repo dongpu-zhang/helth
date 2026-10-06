@@ -175,6 +175,11 @@ def _call_oci(messages_dicts):
         if role == "system":
             system_text = content
         elif role == "user":
+            # OCI GenericChatRequest has no system_message field;
+            # prepend system prompt to the first user turn
+            if system_text:
+                content = system_text + "\n\n" + content
+                system_text = None
             chat_msgs.append(M.UserMessage(
                 content=[M.TextContent(text=content)]
             ))
@@ -185,7 +190,6 @@ def _call_oci(messages_dicts):
 
     chat_request = M.GenericChatRequest(
         messages=chat_msgs,
-        system_message=system_text,
         api_format=M.BaseChatRequest.API_FORMAT_GENERIC,
         temperature=0.4,
         max_tokens=2000,
@@ -266,7 +270,7 @@ def health():
         import edge_tts  # noqa
     except ImportError:
         tts_ok = False
-    return {"status": "ok", "model": OCI_MODEL, "tts": tts_ok, "build": "v7-ocisdk"}
+    return {"status": "ok", "model": OCI_MODEL, "tts": tts_ok, "build": "v8-sysprepend"}
 
 
 @app.get("/", response_class=HTMLResponse)
