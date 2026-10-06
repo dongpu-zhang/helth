@@ -10,44 +10,57 @@ import tempfile
 # ── OCI 证书加载（支持本地文件 + 云端环境变量双模式）───────────────────────────
 
 def _load_oci_cfg():
-    """优先读环境变量（云端），回退到本地 ~/.oci/config（开发）。"""
+    """
+    云端（Render）：从环境变量读取，动态写出 ~/.oci/config + 私钥文件。
+    本地开发：直接读已有的 ~/.oci/config。
+    """
+    import base64
+
+    oci_dir  = os.path.expanduser("~/.oci")
+    cfg_path = os.path.join(oci_dir, "config")
+    key_path = os.path.join(oci_dir, "oci_api_key.pem")
+
     if os.environ.get("OCI_TENANCY"):
-        key_content = os.environ.get("OCI_PRIVATE_KEY", "")
-        if key_content:
-            # 支持 base64 单行或原始 PEM 两种格式
-            import base64
-            stripped = key_content.strip()
-            if not stripped.startswith("-----"):
-                try:
-                    stripped = base64.b64decode(stripped).decode("utf-8")
-                except Exception:
-                    pass
-            # 统一换行符为 LF（Windows 来源的 PEM 可能含 CRLF）
-            stripped = stripped.replace("\r\n", "\n").replace("\r", "\n")
-            kf = tempfile.NamedTemporaryFile(
-                delete=False, suffix=".pem", mode="w", encoding="utf-8", newline="\n"
-            )
-            kf.write(stripped)
-            kf.close()
-            key_file = kf.name
-        else:
-            key_file = os.environ.get("OCI_KEY_FILE", "")
-        return {
-            "user":        os.environ["OCI_USER"],
-            "fingerprint": os.environ["OCI_FINGERPRINT"],
-            "tenancy":     os.environ["OCI_TENANCY"],
-            "key_file":    key_file,
-            "region":      os.environ.get("OCI_REGION", "us-chicago-1"),
-        }
-    local_cfg = os.path.expanduser("~/.oci/config")
-    if os.path.exists(local_cfg):
-        import oci as _oci
-        return _oci.config.from_file(local_cfg, "DEFAULT")
-    raise RuntimeError(
-        "OCI credentials not found.\n"
-        "Cloud: set OCI_USER / OCI_FINGERPRINT / OCI_TENANCY / OCI_PRIVATE_KEY / OCI_REGION\n"
-        "Local: create ~/.oci/config"
-    )
+        # ── 云端模式：写私钥文件 ──
+        key_content = os.environ.get("OCI_PRIVATE_KEY", "").strip()
+        if not key_content:
+            raise RuntimeError("OCI_PRIVATE_KEY env var is empty")
+
+        # 支持 base64 单行或原始 PEM
+        if not key_content.startswith("-----"):
+            key_content = base64.b64decode(key_content).decode("utf-8")
+
+        # 统一换行符
+        key_content = key_content.replace("\r\n", "\n").replace("\r", "\n")
+
+        os.makedirs(oci_dir, exist_ok=True)
+        with open(key_path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(key_content)
+        os.chmod(key_path, 0o600)
+
+        # ── 写 ~/.oci/config ──
+        user        = os.environ["OCI_USER"]
+        fingerprint = os.environ["OCI_FINGERPRINT"]
+        tenancy     = os.environ["OCI_TENANCY"]
+        region      = os.environ.get("OCI_REGION", "us-chicago-1")
+
+        with open(cfg_path, "w", encoding="utf-8") as f:
+            f.write(f"[DEFAULT]\n"
+                    f"user={user}\n"
+                    f"fingerprint={fingerprint}\n"
+                    f"tenancy={tenancy}\n"
+                    f"region={region}\n"
+                    f"key_file={key_path}\n")
+
+    if not os.path.exists(cfg_path):
+        raise RuntimeError(
+            "OCI credentials not found.\n"
+            "Cloud: set OCI_USER / OCI_FINGERPRINT / OCI_TENANCY / OCI_PRIVATE_KEY / OCI_REGION\n"
+            "Local: create ~/.oci/config"
+        )
+
+    import oci as _oci
+    return _oci.config.from_file(cfg_path, "DEFAULT")
 
 
 _cfg = _load_oci_cfg()
