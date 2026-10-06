@@ -183,26 +183,30 @@ def chat_stream(req: ChatRequest):
                 msgs.append(HumanMessage(content=content))
             elif role == "assistant":
                 msgs.append(AIMessage(content=content))
-        try:
-            llm     = _make_llm()
-            got_any = False
-            for chunk in llm.stream(msgs):
-                text = getattr(chunk, "content", "") or ""
-                if text:
-                    got_any = True
-                    yield f"data: {json.dumps({'text': text}, ensure_ascii=False)}\n\n"
-            if not got_any:
-                resp = llm.invoke(msgs)
-                text = getattr(resp, "content", str(resp))
-                yield f"data: {json.dumps({'text': text}, ensure_ascii=False)}\n\n"
-        except Exception:
+        import time
+        last_err = None
+        for attempt in range(3):
             try:
-                resp = _make_llm().invoke(msgs)
-                text = getattr(resp, "content", str(resp))
-                yield f"data: {json.dumps({'text': text}, ensure_ascii=False)}\n\n"
-            except Exception as e2:
-                err = f"服务暂时不可用，请稍后重试。({str(e2)[:120]})"
-                yield f"data: {json.dumps({'text': err}, ensure_ascii=False)}\n\n"
+                llm     = _make_llm()
+                got_any = False
+                for chunk in llm.stream(msgs):
+                    text = getattr(chunk, "content", "") or ""
+                    if text:
+                        got_any = True
+                        yield f"data: {json.dumps({'text': text}, ensure_ascii=False)}\n\n"
+                if not got_any:
+                    resp = llm.invoke(msgs)
+                    text = getattr(resp, "content", str(resp))
+                    yield f"data: {json.dumps({'text': text}, ensure_ascii=False)}\n\n"
+                last_err = None
+                break
+            except Exception as e:
+                last_err = e
+                if attempt < 2:
+                    time.sleep(2 ** attempt)  # 0s, 2s, 4s
+        if last_err is not None:
+            err = f"服务暂时不可用，请稍后重试。({str(last_err)[:120]})"
+            yield f"data: {json.dumps({'text': err}, ensure_ascii=False)}\n\n"
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(
