@@ -75,13 +75,15 @@ os.environ.update({
     "OPENAI_API_KEY":             "sk-oci-local",
     "LITELLM_LOCAL_MODEL_COST_MAP": "True",
 })
-os.environ["LITELLM_LOG"]         = "ERROR"
-os.environ["LITELLM_DROP_PARAMS"] = "True"
+os.environ["LITELLM_LOG"] = "ERROR"
 
 try:
-    import langchain_litellm
+    import langchain_litellm  # noqa: F401
 except ImportError:
     pass
+
+import litellm
+litellm.drop_params = True
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, StreamingResponse, Response
