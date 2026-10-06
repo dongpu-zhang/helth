@@ -22,8 +22,10 @@ def _load_oci_cfg():
                     stripped = base64.b64decode(stripped).decode("utf-8")
                 except Exception:
                     pass
+            # 统一换行符为 LF（Windows 来源的 PEM 可能含 CRLF）
+            stripped = stripped.replace("\r\n", "\n").replace("\r", "\n")
             kf = tempfile.NamedTemporaryFile(
-                delete=False, suffix=".pem", mode="w", encoding="utf-8"
+                delete=False, suffix=".pem", mode="w", encoding="utf-8", newline="\n"
             )
             kf.write(stripped)
             kf.close()
