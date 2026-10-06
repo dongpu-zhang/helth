@@ -158,17 +158,52 @@ SYSTEM_PROMPT = """# 角色
 
 
 def _call_oci(messages_dicts):
-    """Direct liteLLM call without streaming (OCI rejects stream_options)."""
-    response = litellm.completion(
-        model=OCI_MODEL,
-        messages=messages_dicts,
+    """Call OCI GenAI directly via OCI SDK — no liteLLM, no stream_options."""
+    import oci.generative_ai_inference
+    import oci.generative_ai_inference.models as M
+
+    region = _cfg.get("region", "us-chicago-1")
+    client = oci.generative_ai_inference.GenerativeAiInferenceClient(
+        config=_cfg,
+        service_endpoint=f"https://inference.generativeai.{region}.oci.oraclecloud.com",
+    )
+
+    system_text = None
+    chat_msgs = []
+    for m in messages_dicts:
+        role, content = m.get("role", ""), m.get("content", "")
+        if role == "system":
+            system_text = content
+        elif role == "user":
+            chat_msgs.append(M.UserMessage(
+                content=[M.TextContent(text=content)]
+            ))
+        elif role == "assistant":
+            chat_msgs.append(M.AssistantMessage(
+                content=[M.TextContent(text=content)]
+            ))
+
+    chat_request = M.GenericChatRequest(
+        messages=chat_msgs,
+        system_message=system_text,
+        api_format=M.BaseChatRequest.API_FORMAT_GENERIC,
         temperature=0.4,
         max_tokens=2000,
-        compartment_id=_cfg["tenancy"],
-        drop_params=True,
-        stream=False,
+        is_stream=False,
     )
-    return (response.choices[0].message.content or "") if response.choices else ""
+    detail = M.ChatDetails(
+        compartment_id=_cfg["tenancy"],
+        serving_mode=M.OnDemandServingMode(model_id="xai.grok-4.7"),
+        chat_request=chat_request,
+    )
+    resp = client.chat(detail)
+    choices = resp.data.chat_response.choices
+    if not choices:
+        return ""
+    content = choices[0].message.content
+    if isinstance(content, list):
+        return "".join(getattr(p, "text", "") for p in content)
+    return str(content)
 
 
 app = FastAPI(title="筋膜枪使用教练")
@@ -231,7 +266,7 @@ def health():
         import edge_tts  # noqa
     except ImportError:
         tts_ok = False
-    return {"status": "ok", "model": OCI_MODEL, "tts": tts_ok}
+    return {"status": "ok", "model": OCI_MODEL, "tts": tts_ok, "build": "v7-ocisdk"}
 
 
 @app.get("/", response_class=HTMLResponse)
