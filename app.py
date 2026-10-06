@@ -656,6 +656,67 @@ function toast(msg) {
 </html>
 """
 
+@app.get("/debug/oci")
+def debug_oci():
+    import base64
+    oci_dir  = os.path.expanduser("~/.oci")
+    cfg_path = os.path.join(oci_dir, "config")
+    key_path = os.path.join(oci_dir, "oci_api_key.pem")
+
+    info = {}
+
+    # env vars present?
+    info["env_OCI_TENANCY"]      = bool(os.environ.get("OCI_TENANCY"))
+    info["env_OCI_USER"]         = bool(os.environ.get("OCI_USER"))
+    info["env_OCI_FINGERPRINT"]  = bool(os.environ.get("OCI_FINGERPRINT"))
+    info["env_OCI_PRIVATE_KEY"]  = bool(os.environ.get("OCI_PRIVATE_KEY"))
+    info["env_OCI_REGION"]       = os.environ.get("OCI_REGION", "(not set)")
+    info["fingerprint_value"]    = os.environ.get("OCI_FINGERPRINT", "")[:40]  # partial only
+
+    # config file
+    info["config_exists"] = os.path.exists(cfg_path)
+    if info["config_exists"]:
+        with open(cfg_path, "r", encoding="utf-8") as f:
+            raw = f.read()
+        lines = raw.splitlines()
+        info["config_lines"] = len(lines)
+        info["config_content_redacted"] = "\n".join(
+            (l if not l.lower().startswith("key_file") else l)
+            for l in lines
+        )
+
+    # key file
+    info["key_file_exists"] = os.path.exists(key_path)
+    if info["key_file_exists"]:
+        raw_key = open(key_path, "rb").read()
+        info["key_bytes"] = len(raw_key)
+        info["key_has_crlf"] = b"\r\n" in raw_key
+        text_key = raw_key.decode("utf-8", errors="replace")
+        klines = text_key.splitlines()
+        info["key_first_line"] = klines[0] if klines else ""
+        info["key_last_line"]  = klines[-1] if klines else ""
+        info["key_total_lines"] = len(klines)
+
+    # try a live OCI call
+    try:
+        import oci as _oci
+        cfg2 = _oci.config.from_file(cfg_path, "DEFAULT")
+        _oci.config.validate_config(cfg2)
+        info["oci_config_valid"] = True
+        # Try a cheap API call: list compartments
+        try:
+            id_client = _oci.identity.IdentityClient(cfg2)
+            resp = id_client.get_tenancy(cfg2["tenancy"])
+            info["oci_api_test"] = "ok: tenancy=" + str(resp.data.name)
+        except Exception as e_api:
+            info["oci_api_test"] = "FAIL: " + str(e_api)[:300]
+    except Exception as e_cfg:
+        info["oci_config_valid"] = False
+        info["oci_config_error"] = str(e_cfg)[:300]
+
+    return info
+
+
 if __name__ == "__main__":
     import sys
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
