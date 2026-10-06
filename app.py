@@ -270,7 +270,7 @@ def health():
         import edge_tts  # noqa
     except ImportError:
         tts_ok = False
-    return {"status": "ok", "model": OCI_MODEL, "tts": tts_ok, "build": "v8-sysprepend"}
+    return {"status": "ok", "model": OCI_MODEL, "tts": tts_ok, "build": "v9-ios"}
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -408,9 +408,35 @@ let voiceTriggered = false;
 let isListening    = false;
 let _pttReleased   = false;
 
+// ── iOS 专项 ──────────────────────────────────────────────────────────────────
+const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+let iosAudioUnlocked = false;
+
+function iosUnlockAudio() {
+  if (iosAudioUnlocked || !isIOS) return;
+  // 首次触摸时播放一个无声音频，解锁后续 fetch→play() 的自动播放权限
+  const sil = new Audio('data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAIlYAAESsAAACABAAZGF0YQAAAAA=');
+  sil.volume = 0.001;
+  sil.play().then(() => { iosAudioUnlocked = true; }).catch(() => {});
+}
+document.addEventListener('touchstart', iosUnlockAudio, { passive: true, once: true });
+
+function setupIOSViewport() {
+  if (!isIOS || !window.visualViewport) return;
+  const footer = document.querySelector('footer');
+  window.visualViewport.addEventListener('resize', () => {
+    // 软键盘弹起时把 footer 上移，避免被键盘遮住
+    const offset = window.innerHeight - window.visualViewport.height;
+    footer.style.transform = offset > 50 ? `translateY(-${offset}px)` : '';
+    if (offset < 50) scrollBottom();
+  });
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 window.addEventListener('DOMContentLoaded', () => {
   checkHealth();
   setupVoice();
+  setupIOSViewport();
   showWelcome();
 });
 
