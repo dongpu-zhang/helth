@@ -10,7 +10,7 @@ import tempfile
 # ── OCI 证书加载（支持本地文件 + 云端环境变量双模式）───────────────────────────
 
 def _load_oci_cfg():
-    """本地从 ~/.oci/config 读取；云端从环境变量读取，私钥写临时文件。"""
+    """优先读环境变量（云端），回退到本地 ~/.oci/config（开发）。"""
     if os.environ.get("OCI_TENANCY"):
         key_content = os.environ.get("OCI_PRIVATE_KEY", "")
         if key_content:
@@ -29,8 +29,15 @@ def _load_oci_cfg():
             "key_file":    key_file,
             "region":      os.environ.get("OCI_REGION", "us-chicago-1"),
         }
-    import oci as _oci
-    return _oci.config.from_file(os.path.expanduser("~/.oci/config"), "DEFAULT")
+    local_cfg = os.path.expanduser("~/.oci/config")
+    if os.path.exists(local_cfg):
+        import oci as _oci
+        return _oci.config.from_file(local_cfg, "DEFAULT")
+    raise RuntimeError(
+        "OCI credentials not found.\n"
+        "Cloud: set OCI_USER / OCI_FINGERPRINT / OCI_TENANCY / OCI_PRIVATE_KEY / OCI_REGION\n"
+        "Local: create ~/.oci/config"
+    )
 
 
 _cfg = _load_oci_cfg()
