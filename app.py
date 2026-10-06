@@ -157,8 +157,8 @@ SYSTEM_PROMPT = """# 角色
 专业但好懂，像靠谱的健身/康复教练，简洁可执行，用中文回复。"""
 
 
-def _call_oci_stream(messages_dicts):
-    """Direct liteLLM streaming, bypassing LangChain to control drop_params."""
+def _call_oci(messages_dicts):
+    """Direct liteLLM call without streaming (OCI rejects stream_options)."""
     response = litellm.completion(
         model=OCI_MODEL,
         messages=messages_dicts,
@@ -166,12 +166,9 @@ def _call_oci_stream(messages_dicts):
         max_tokens=2000,
         compartment_id=_cfg["tenancy"],
         drop_params=True,
-        stream=True,
+        stream=False,
     )
-    for chunk in response:
-        text = (chunk.choices[0].delta.content or "") if chunk.choices else ""
-        if text:
-            yield text
+    return (response.choices[0].message.content or "") if response.choices else ""
 
 
 app = FastAPI(title="筋膜枪使用教练")
@@ -190,8 +187,8 @@ def chat_stream(req: ChatRequest):
             if role in ("user", "assistant"):
                 msgs.append({"role": role, "content": m.get("content", "")})
         try:
-            for text in _call_oci_stream(msgs):
-                yield f"data: {json.dumps({'text': text}, ensure_ascii=False)}\n\n"
+            text = _call_oci(msgs)
+            yield f"data: {json.dumps({'text': text}, ensure_ascii=False)}\n\n"
         except Exception as e:
             err = f"服务暂时不可用，请稍后重试。({str(e)[:120]})"
             yield f"data: {json.dumps({'text': err}, ensure_ascii=False)}\n\n"
