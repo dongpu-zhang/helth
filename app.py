@@ -75,7 +75,8 @@ os.environ.update({
     "OPENAI_API_KEY":             "sk-oci-local",
     "LITELLM_LOCAL_MODEL_COST_MAP": "True",
 })
-os.environ["LITELLM_LOG"] = "ERROR"
+os.environ["LITELLM_LOG"]         = "ERROR"
+os.environ["LITELLM_DROP_PARAMS"] = "True"
 
 try:
     import langchain_litellm
@@ -189,11 +190,17 @@ def chat_stream(req: ChatRequest):
             try:
                 llm     = _make_llm()
                 got_any = False
-                for chunk in llm.stream(msgs):
-                    text = getattr(chunk, "content", "") or ""
-                    if text:
-                        got_any = True
-                        yield f"data: {json.dumps({'text': text}, ensure_ascii=False)}\n\n"
+                try:
+                    for chunk in llm.stream(msgs):
+                        text = getattr(chunk, "content", "") or ""
+                        if text:
+                            got_any = True
+                            yield f"data: {json.dumps({'text': text}, ensure_ascii=False)}\n\n"
+                except Exception as se:
+                    if "stream_options" in str(se):
+                        got_any = False  # fall through to invoke
+                    else:
+                        raise
                 if not got_any:
                     resp = llm.invoke(msgs)
                     text = getattr(resp, "content", str(resp))
@@ -203,7 +210,7 @@ def chat_stream(req: ChatRequest):
             except Exception as e:
                 last_err = e
                 if attempt < 2:
-                    time.sleep(2 ** attempt)  # 0s, 2s, 4s
+                    time.sleep(2 ** attempt)
         if last_err is not None:
             err = f"服务暂时不可用，请稍后重试。({str(last_err)[:120]})"
             yield f"data: {json.dumps({'text': err}, ensure_ascii=False)}\n\n"
