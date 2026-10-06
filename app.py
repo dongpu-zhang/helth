@@ -14,10 +14,18 @@ def _load_oci_cfg():
     if os.environ.get("OCI_TENANCY"):
         key_content = os.environ.get("OCI_PRIVATE_KEY", "")
         if key_content:
+            # 支持 base64 单行或原始 PEM 两种格式
+            import base64
+            stripped = key_content.strip()
+            if not stripped.startswith("-----"):
+                try:
+                    stripped = base64.b64decode(stripped).decode("utf-8")
+                except Exception:
+                    pass
             kf = tempfile.NamedTemporaryFile(
                 delete=False, suffix=".pem", mode="w", encoding="utf-8"
             )
-            kf.write(key_content.replace("\\n", "\n"))
+            kf.write(stripped)
             kf.close()
             key_file = kf.name
         else:
