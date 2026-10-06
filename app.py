@@ -157,14 +157,21 @@ SYSTEM_PROMPT = """# 角色
 专业但好懂，像靠谱的健身/康复教练，简洁可执行，用中文回复。"""
 
 
-def _make_llm():
-    from langchain_litellm import ChatLiteLLM
-    return ChatLiteLLM(
+def _call_oci_stream(messages_dicts):
+    """Direct liteLLM streaming, bypassing LangChain to control drop_params."""
+    response = litellm.completion(
         model=OCI_MODEL,
-        model_kwargs={"compartment_id": _cfg["tenancy"], "timeout": 120},
+        messages=messages_dicts,
         temperature=0.4,
         max_tokens=2000,
+        compartment_id=_cfg["tenancy"],
+        drop_params=True,
+        stream=True,
     )
+    for chunk in response:
+        text = (chunk.choices[0].delta.content or "") if chunk.choices else ""
+        if text:
+            yield text
 
 
 app = FastAPI(title="筋膜枪使用教练")
@@ -176,45 +183,17 @@ class ChatRequest(BaseModel):
 
 @app.post("/chat")
 def chat_stream(req: ChatRequest):
-    from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
-
     def generate():
-        msgs = [SystemMessage(content=SYSTEM_PROMPT)]
+        msgs = [{"role": "system", "content": SYSTEM_PROMPT}]
         for m in req.messages:
-            role, content = m.get("role", ""), m.get("content", "")
-            if role == "user":
-                msgs.append(HumanMessage(content=content))
-            elif role == "assistant":
-                msgs.append(AIMessage(content=content))
-        import time
-        last_err = None
-        for attempt in range(3):
-            try:
-                llm     = _make_llm()
-                got_any = False
-                try:
-                    for chunk in llm.stream(msgs):
-                        text = getattr(chunk, "content", "") or ""
-                        if text:
-                            got_any = True
-                            yield f"data: {json.dumps({'text': text}, ensure_ascii=False)}\n\n"
-                except Exception as se:
-                    if "stream_options" in str(se):
-                        got_any = False  # fall through to invoke
-                    else:
-                        raise
-                if not got_any:
-                    resp = llm.invoke(msgs)
-                    text = getattr(resp, "content", str(resp))
-                    yield f"data: {json.dumps({'text': text}, ensure_ascii=False)}\n\n"
-                last_err = None
-                break
-            except Exception as e:
-                last_err = e
-                if attempt < 2:
-                    time.sleep(2 ** attempt)
-        if last_err is not None:
-            err = f"服务暂时不可用，请稍后重试。({str(last_err)[:120]})"
+            role = m.get("role", "")
+            if role in ("user", "assistant"):
+                msgs.append({"role": role, "content": m.get("content", "")})
+        try:
+            for text in _call_oci_stream(msgs):
+                yield f"data: {json.dumps({'text': text}, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            err = f"服务暂时不可用，请稍后重试。({str(e)[:120]})"
             yield f"data: {json.dumps({'text': err}, ensure_ascii=False)}\n\n"
         yield "data: [DONE]\n\n"
 
